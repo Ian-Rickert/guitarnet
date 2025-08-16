@@ -3,8 +3,11 @@ import { View, Text, StyleSheet, TextInput, FlatList, TouchableOpacity, Activity
 import { db } from '../../firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { searchArtists, getPopularArtists } from '../services/artistService';
+import { searchSongs } from '../services/songService';
+import { useAuth } from '../contexts/AuthContext';
 
 const HomeScreen = ({ navigation }) => {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedArtist, setSelectedArtist] = useState('');
   const [selectedSkill, setSelectedSkill] = useState('');
@@ -12,33 +15,52 @@ const HomeScreen = ({ navigation }) => {
   const [artistSearchResults, setArtistSearchResults] = useState([]);
   const [isSearchingArtists, setIsSearchingArtists] = useState(false);
   const [showArtistResults, setShowArtistResults] = useState(false);
+  const [searchType, setSearchType] = useState('artist'); // 'artist' or 'song'
+  const [songSearchResults, setSongSearchResults] = useState([]);
+  const [isSearchingSongs, setIsSearchingSongs] = useState(false);
+  const [showSongResults, setShowSongResults] = useState(false);
+  const [selectedSong, setSelectedSong] = useState('');
 
   const skillLevels = ['Beginner', 'Intermediate', 'Advanced', 'Expert'];
 
-  // Debounced search for artists
+  // Debounced search for artists or songs
   useEffect(() => {
     const timeoutId = setTimeout(async () => {
       if (searchQuery.trim().length >= 2) {
-        setIsSearchingArtists(true);
-        const results = await searchArtists(searchQuery);
-        setArtistSearchResults(results);
-        setIsSearchingArtists(false);
-        setShowArtistResults(true);
+        if (searchType === 'artist') {
+          setIsSearchingArtists(true);
+          const results = await searchArtists(searchQuery);
+          setArtistSearchResults(results);
+          setIsSearchingArtists(false);
+          setShowArtistResults(true);
+          setShowSongResults(false);
+        } else if (searchType === 'song') {
+          setIsSearchingSongs(true);
+          const results = await searchSongs(searchQuery, 20);
+          setSongSearchResults(results);
+          setIsSearchingSongs(false);
+          setShowSongResults(true);
+          setShowArtistResults(false);
+        }
       } else {
         setArtistSearchResults([]);
+        setSongSearchResults([]);
         setShowArtistResults(false);
+        setShowSongResults(false);
       }
     }, 300);
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, searchType]);
 
   const searchUsers = async () => {
     try {
       let q = collection(db, 'users');
       
-      if (selectedArtist) {
+      if (searchType === 'artist' && selectedArtist) {
         q = query(q, where('favoriteArtists', 'array-contains', selectedArtist));
+      } else if (searchType === 'song' && selectedSong) {
+        q = query(q, where('songs', 'array-contains', selectedSong));
       }
       
       if (selectedSkill) {
@@ -48,7 +70,10 @@ const HomeScreen = ({ navigation }) => {
       const querySnapshot = await getDocs(q);
       const userList = [];
       querySnapshot.forEach((doc) => {
-        userList.push({ id: doc.id, ...doc.data() });
+        // Filter out the current user from search results
+        if (doc.id !== user?.uid) {
+          userList.push({ id: doc.id, ...doc.data() });
+        }
       });
       
       setUsers(userList);
@@ -69,10 +94,22 @@ const HomeScreen = ({ navigation }) => {
     setShowArtistResults(false);
   };
 
+  const selectSong = (song) => {
+    setSelectedSong(song.name);
+    setSearchQuery(song.name);
+    setShowSongResults(false);
+  };
+
+  const clearSongSelection = () => {
+    setSelectedSong('');
+    setSearchQuery('');
+    setShowSongResults(false);
+  };
+
   const renderUser = ({ item }) => (
     <TouchableOpacity 
       style={styles.userCard}
-      onPress={() => navigation.navigate('Profile', { userId: item.id })}
+      onPress={() => navigation.navigate('UserProfile', { userId: item.id })}
     >
       <Text style={styles.userName}>{item.username}</Text>
       <Text style={styles.userSkill}>Skill: {item.skillLevel}</Text>
@@ -91,54 +128,133 @@ const HomeScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
+  const renderSongResult = ({ item }) => (
+    <TouchableOpacity
+      style={styles.songResultItem}
+      onPress={() => selectSong(item)}
+    >
+      <Text style={styles.songResultText}>{item.name}</Text>
+      <Text style={styles.songResultArtist}>{item.artist}</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Find Guitarists</Text>
       
       <View style={styles.searchSection}>
-        <Text style={styles.sectionTitle}>Search by Artist:</Text>
-        <View style={styles.artistSearchContainer}>
-          <TextInput
-            style={styles.artistSearchInput}
-            placeholder="Type to search artists..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onFocus={() => {
-              if (searchQuery.trim().length >= 2) {
-                setShowArtistResults(true);
-              }
+        <View style={styles.searchHeaderContainer}>
+          <Text style={styles.sectionTitle}>Search by </Text>
+          <TouchableOpacity
+            style={styles.searchTypeToggle}
+            onPress={() => {
+              setSearchType(searchType === 'artist' ? 'song' : 'artist');
+              setSearchQuery('');
+              setSelectedArtist('');
+              setSelectedSong('');
+              setShowArtistResults(false);
+              setShowSongResults(false);
             }}
-          />
-          {selectedArtist && (
-            <TouchableOpacity style={styles.clearButton} onPress={clearArtistSelection}>
-              <Text style={styles.clearButtonText}>✕</Text>
-            </TouchableOpacity>
-          )}
+          >
+            <Text style={styles.searchTypeToggleText}>
+              {searchType === 'artist' ? 'Artist' : 'Song'}
+            </Text>
+          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>:</Text>
         </View>
-        
-        {isSearchingArtists && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color="#4285f4" />
-            <Text style={styles.loadingText}>Searching artists...</Text>
-          </View>
-        )}
-        
-        {showArtistResults && artistSearchResults.length > 0 && (
-          <View style={styles.artistResultsContainer}>
-            <FlatList
-              data={artistSearchResults}
-              renderItem={renderArtistResult}
-              keyExtractor={(item) => item}
-              style={styles.artistResultsList}
-              nestedScrollEnabled={true}
-            />
-          </View>
-        )}
-        
-        {selectedArtist && (
-          <View style={styles.selectedArtistContainer}>
-            <Text style={styles.selectedArtistText}>Selected: {selectedArtist}</Text>
-          </View>
+
+        {searchType === 'artist' ? (
+          <>
+            <View style={styles.artistSearchContainer}>
+              <TextInput
+                style={styles.artistSearchInput}
+                placeholder="Type to search artists..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onFocus={() => {
+                  if (searchQuery.trim().length >= 2) {
+                    setShowArtistResults(true);
+                  }
+                }}
+              />
+              {selectedArtist && (
+                <TouchableOpacity style={styles.clearButton} onPress={clearArtistSelection}>
+                  <Text style={styles.clearButtonText}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {isSearchingArtists && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#4285f4" />
+                <Text style={styles.loadingText}>Searching artists...</Text>
+              </View>
+            )}
+            
+            {showArtistResults && artistSearchResults.length > 0 && (
+              <View style={styles.artistResultsContainer}>
+                <FlatList
+                  data={artistSearchResults}
+                  renderItem={renderArtistResult}
+                  keyExtractor={(item) => item}
+                  style={styles.artistResultsList}
+                  nestedScrollEnabled={true}
+                />
+              </View>
+            )}
+            
+            {selectedArtist && (
+              <View style={styles.selectedArtistContainer}>
+                <Text style={styles.selectedArtistText}>Selected: {selectedArtist}</Text>
+              </View>
+            )}
+          </>
+        ) : (
+          <>
+            <View style={styles.songSearchContainer}>
+              <TextInput
+                style={styles.songSearchInput}
+                placeholder="Type to search songs..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                onFocus={() => {
+                  if (searchQuery.trim().length >= 2) {
+                    setShowSongResults(true);
+                  }
+                }}
+              />
+              {selectedSong && (
+                <TouchableOpacity style={styles.clearButton} onPress={clearSongSelection}>
+                  <Text style={styles.clearButtonText}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {isSearchingSongs && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color="#4285f4" />
+                <Text style={styles.loadingText}>Searching songs...</Text>
+              </View>
+            )}
+            
+            {showSongResults && songSearchResults.length > 0 && (
+              <View style={styles.songResultsContainer}>
+                <FlatList
+                  data={songSearchResults}
+                  renderItem={renderSongResult}
+                  keyExtractor={(item, index) => `${item.name}-${item.artist}-${index}`}
+                  style={styles.songResultsList}
+                  nestedScrollEnabled={true}
+                />
+              </View>
+            )}
+            
+            {selectedSong && (
+              <View style={styles.selectedSongContainer}>
+                <Text style={styles.selectedSongText}>Selected: {selectedSong}</Text>
+              </View>
+            )}
+          </>
         )}
         
         <Text style={styles.sectionTitle}>Filter by Skill Level:</Text>
@@ -158,7 +274,9 @@ const HomeScreen = ({ navigation }) => {
         />
         
         <TouchableOpacity style={styles.searchButton} onPress={searchUsers}>
-          <Text style={styles.searchButtonText}>Search Guitarists</Text>
+          <Text style={styles.searchButtonText}>
+            Search
+          </Text>
         </TouchableOpacity>
       </View>
       
@@ -169,8 +287,8 @@ const HomeScreen = ({ navigation }) => {
         style={styles.userList}
         ListEmptyComponent={
           <Text style={styles.emptyText}>
-            {users.length === 0 && !selectedArtist && !selectedSkill 
-              ? 'Search for guitarists by artist or skill level'
+            {users.length === 0 && !selectedArtist && !selectedSong && !selectedSkill 
+              ? `Search for guitarists by ${searchType === 'artist' ? 'artist' : 'song'} or skill level`
               : 'No guitarists found matching your criteria'
             }
           </Text>
@@ -322,6 +440,73 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 50,
     fontSize: 16,
+  },
+  songResultItem: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#444444',
+  },
+  songResultText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  songResultArtist: {
+    color: '#cccccc',
+    fontSize: 14,
+  },
+
+  songSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  songSearchInput: {
+    backgroundColor: '#333333',
+    color: '#ffffff',
+    padding: 15,
+    borderRadius: 10,
+    fontSize: 16,
+    flex: 1,
+  },
+  songResultsContainer: {
+    backgroundColor: '#333333',
+    borderRadius: 10,
+    maxHeight: 200,
+    marginTop: 5,
+  },
+  songResultsList: {
+    maxHeight: 200,
+  },
+  selectedSongContainer: {
+    backgroundColor: '#4285f4',
+    padding: 10,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  selectedSongText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  searchHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  searchTypeToggle: {
+    backgroundColor: '#333333',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#444444',
+  },
+  searchTypeToggleText: {
+    color: '#4285f4',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

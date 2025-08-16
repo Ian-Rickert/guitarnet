@@ -5,6 +5,7 @@ import { Text } from 'react-native';
 
 import HomeScreen from '../screens/HomeScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import UserProfileScreen from '../screens/UserProfileScreen';
 import MissionScreen from '../screens/MissionScreen';
 
 const Tab = createBottomTabNavigator();
@@ -36,7 +37,7 @@ const TabNavigator = () => {
         }}
       />
       <Tab.Screen
-        name="Profile"
+        name="My Profile"
         component={ProfileScreen}
         options={{
           tabBarIcon: ({ color }) => (
@@ -65,6 +66,7 @@ const AppNavigator = () => {
       }}
     >
       <Stack.Screen name="Main" component={TabNavigator} />
+      <Stack.Screen name="UserProfile" component={UserProfileScreen} />
     </Stack.Navigator>
   );
 };
