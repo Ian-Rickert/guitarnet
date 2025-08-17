@@ -11,7 +11,7 @@ import { searchArtists } from '../services/artistService';
 import { searchSongs } from '../services/songService';
 
 const ProfileScreen = ({ navigation, route }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [profile, setProfile] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
@@ -801,21 +801,7 @@ const ProfileScreen = ({ navigation, route }) => {
           <Text style={styles.skillLevel}>{profile.skillLevel || 'Beginner'}</Text>
         </View>
         
-        <TouchableOpacity 
-          style={styles.signOutButton}
-          onPress={() => {
-            Alert.alert(
-              'Sign Out',
-              'Are you sure you want to sign out?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Sign Out', style: 'destructive', onPress: logout }
-              ]
-            );
-          }}
-        >
-          <Text style={styles.signOutButtonText}>Sign Out</Text>
-        </TouchableOpacity>
+
       </View>
         
         {/* Email Section */}

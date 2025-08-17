@@ -53,7 +53,6 @@ const TabNavigator = () => {
           tabBarIcon: ({ color }) => (
             <Text style={{ color, fontSize: 20 }}>👤</Text>
           ),
-          headerRight: () => null, // Remove sign out button from this tab
         }}
       />
       <Tab.Screen
