@@ -9,7 +9,8 @@
     "web": "expo start --web",
     "seed": "node scripts/seedDatabase.js",
     "import-artists": "node scripts/importArtists.js",
-    "import-songs": "node scripts/importSongs.js"
+    "import-songs": "node scripts/importSongs.js",
+    "import-spotify-tracks": "node scripts/importSpotifyTracks.js"
   },
   "dependencies": {
     "@expo/metro-runtime": "~5.0.4",

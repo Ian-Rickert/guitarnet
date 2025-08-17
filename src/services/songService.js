@@ -11,15 +11,21 @@ export const searchSongs = async (searchQuery, maxResults = 20) => {
     const queryLower = searchQuery.toLowerCase().trim();
     const results = [];
     
+    console.log(`🔍 Searching for songs with query: "${searchQuery}" (${queryLower})`);
+    
     // Get all documents from the songs collection
     const songsCollection = collection(db, 'songs');
     const querySnapshot = await getDocs(songsCollection);
+    
+    console.log(`📚 Found ${querySnapshot.size} chunks to search through`);
     
     // Search through each chunk document
     for (const docSnapshot of querySnapshot.docs) {
       const chunkData = docSnapshot.data();
       
       if (chunkData.songs && Array.isArray(chunkData.songs)) {
+        console.log(`🔍 Searching chunk ${chunkData.chunkIndex} (${chunkData.alphabeticalRange}) with ${chunkData.songs.length} songs`);
+        
         // Filter songs in this chunk that match the search query
         const matchingSongs = chunkData.songs.filter(song => {
           if (song.name && typeof song.name === 'string') {
@@ -27,6 +33,11 @@ export const searchSongs = async (searchQuery, maxResults = 20) => {
           }
           return false;
         });
+        
+        if (matchingSongs.length > 0) {
+          console.log(`✅ Found ${matchingSongs.length} matches in chunk ${chunkData.chunkIndex}:`, 
+            matchingSongs.map(s => s.name).slice(0, 3));
+        }
         
         // Add matching songs to results
         results.push(...matchingSongs.map(song => ({
@@ -36,10 +47,8 @@ export const searchSongs = async (searchQuery, maxResults = 20) => {
           alphabeticalRange: chunkData.alphabeticalRange
         })));
         
-        // Stop if we have enough results
-        if (results.length >= maxResults) {
-          break;
-        }
+        // Don't stop early - search all chunks to ensure we find all matches
+        // This is especially important for custom songs that might be in different chunks
       }
     }
     
@@ -59,6 +68,10 @@ export const searchSongs = async (searchQuery, maxResults = 20) => {
       // Otherwise sort alphabetically
       return aName.localeCompare(bName);
     });
+    
+    console.log(`🎯 Total search results: ${results.length} songs`);
+    console.log(`📋 Final results (limited to ${maxResults}):`, 
+      results.slice(0, maxResults).map(s => s.name));
     
     // Return limited results
     return results.slice(0, maxResults);

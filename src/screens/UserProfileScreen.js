@@ -5,7 +5,7 @@ import { db } from '../../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 const UserProfileScreen = ({ navigation, route }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -76,13 +76,29 @@ const UserProfileScreen = ({ navigation, route }) => {
       scrollEnabled={true}
       nestedScrollEnabled={true}
     >
-      {/* Header with back button */}
+      {/* Header with back button and sign out */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.navigate('Main')}
         >
           <Text style={styles.backButtonText}>← Back to Home</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.signOutButton}
+          onPress={() => {
+            Alert.alert(
+              'Sign Out',
+              'Are you sure you want to sign out?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: logout }
+              ]
+            );
+          }}
+        >
+          <Text style={styles.signOutButtonText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
 
@@ -346,6 +362,37 @@ const styles = StyleSheet.create({
   meetingButtonText: {
     color: '#ffffff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333333',
+  },
+  backButton: {
+    backgroundColor: '#333333',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  backButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  signOutButton: {
+    backgroundColor: '#dc3545',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  signOutButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

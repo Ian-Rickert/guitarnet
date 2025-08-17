@@ -1,7 +1,8 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
-import { Text } from 'react-native';
+import { Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
 
 import HomeScreen from '../screens/HomeScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -12,6 +13,14 @@ const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
 const TabNavigator = () => {
+  const { logout } = useAuth();
+
+  const SignOutButton = () => (
+    <TouchableOpacity style={styles.signOutButton} onPress={logout}>
+      <Text style={styles.signOutText}>Sign Out</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -25,6 +34,7 @@ const TabNavigator = () => {
           backgroundColor: '#1a1a1a',
         },
         headerTintColor: '#ffffff',
+        headerRight: () => <SignOutButton />,
       }}
     >
       <Tab.Screen
@@ -70,5 +80,20 @@ const AppNavigator = () => {
     </Stack.Navigator>
   );
 };
+
+const styles = StyleSheet.create({
+  signOutButton: {
+    backgroundColor: '#dc3545',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 15,
+  },
+  signOutText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+});
 
 export default AppNavigator; 

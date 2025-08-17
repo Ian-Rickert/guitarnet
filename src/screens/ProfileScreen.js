@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, FlatList } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { db, storage } from '../../firebase';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, addDoc, collection } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { Linking } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -11,7 +11,7 @@ import { searchArtists } from '../services/artistService';
 import { searchSongs } from '../services/songService';
 
 const ProfileScreen = ({ navigation, route }) => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [profile, setProfile] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({});
@@ -35,6 +35,9 @@ const ProfileScreen = ({ navigation, route }) => {
   const [songSearchQuery, setSongSearchQuery] = useState('');
   const [songSearchResults, setSongSearchResults] = useState([]);
   const [isSearchingSongs, setIsSearchingSongs] = useState(false);
+  const [showNoResultsMessage, setShowNoResultsMessage] = useState(false);
+  const [customSongInput, setCustomSongInput] = useState('');
+  const [isAddingCustomSong, setIsAddingCustomSong] = useState(false);
 
   const presetPics = [
     '🎸', '🎵', '🎶', '🎼', '🎹', '🥁', '🎤', '🎧'
@@ -111,8 +114,16 @@ const ProfileScreen = ({ navigation, route }) => {
         const results = await searchSongs(songSearchQuery, 15);
         setSongSearchResults(results);
         setIsSearchingSongs(false);
+        
+        // Show no results message if search returned empty and query is still valid
+        if (results.length === 0 && songSearchQuery.trim().length >= 2) {
+          setShowNoResultsMessage(true);
+        } else {
+          setShowNoResultsMessage(false);
+        }
       } else {
         setSongSearchResults([]);
+        setShowNoResultsMessage(false);
       }
     }, 300);
 
@@ -196,9 +207,9 @@ const ProfileScreen = ({ navigation, route }) => {
       setNewSongInput('');
       setIsAddingSong(false);
       
-      // Clear search results after adding
-      setSongSearchQuery('');
-      setSongSearchResults([]);
+      // Set the search query to the newly added song so it appears in results
+      setSongSearchQuery(newSongInput.trim());
+      // The search effect will automatically run and show the results
       
       Alert.alert('Success', 'Song added successfully!');
     } catch (error) {
@@ -230,9 +241,9 @@ const ProfileScreen = ({ navigation, route }) => {
       setProfile({ ...profile, songs: updatedSongs });
       setEditData({ ...editData, songs: updatedSongs });
       
-      // Clear search after selecting
-      setSongSearchQuery('');
-      setSongSearchResults([]);
+      // Set the search query to the newly added song so it appears in results
+      setSongSearchQuery(songName);
+      // The search effect will automatically run and show the results
       setIsAddingSong(false);
       
       Alert.alert('Success', `"${songName}" added successfully!`);
@@ -337,6 +348,8 @@ const ProfileScreen = ({ navigation, route }) => {
     setNewSongInput('');
     setSongSearchQuery('');
     setSongSearchResults([]);
+    setShowNoResultsMessage(false);
+    setCustomSongInput('');
   };
 
   const cancelAddingSong = () => {
@@ -344,6 +357,8 @@ const ProfileScreen = ({ navigation, route }) => {
     setNewSongInput('');
     setSongSearchQuery('');
     setSongSearchResults([]);
+    setShowNoResultsMessage(false);
+    setCustomSongInput('');
   };
 
   const startAddingArtist = () => {
@@ -360,6 +375,162 @@ const ProfileScreen = ({ navigation, route }) => {
 
   const selectArtistFromSearch = (artist) => {
     addArtist(artist);
+  };
+
+  const addCustomSongToDatabase = async (songName, artistName = 'Unknown Artist') => {
+    try {
+      // Find the appropriate chunk to add this song to
+      const songsCollection = collection(db, 'songs');
+      
+      // Create a new song object with user-added marker
+      const newSong = {
+        name: songName.trim(),
+        artist: artistName.trim(),
+        userAdded: true,
+        addedBy: user.uid,
+        addedAt: new Date(),
+        source: 'user_custom'
+      };
+
+      // Get all chunks and find the best place to insert this song
+      const querySnapshot = await getDocs(songsCollection);
+      let targetChunk = null;
+      let targetChunkIndex = -1;
+      let bestChunk = null;
+      let bestChunkIndex = -1;
+
+      // First, try to find a chunk that already contains songs in the same alphabetical range
+      const songFirstLetter = songName.trim().charAt(0).toUpperCase();
+      
+      for (const docSnapshot of querySnapshot.docs) {
+        const chunkData = docSnapshot.data();
+        if (chunkData.songs && Array.isArray(chunkData.songs) && chunkData.songs.length > 0) {
+          // Check if this chunk has songs in the same alphabetical range
+          const firstSongLetter = chunkData.songs[0].name.charAt(0).toUpperCase();
+          const lastSongLetter = chunkData.songs[chunkData.songs.length - 1].name.charAt(0).toUpperCase();
+          
+          // If the song fits in this chunk's alphabetical range and there's space
+          if (songFirstLetter >= firstSongLetter && songFirstLetter <= lastSongLetter && chunkData.songs.length < 1000) {
+            targetChunk = docSnapshot;
+            targetChunkIndex = chunkData.chunkIndex;
+            break;
+          }
+          
+          // Keep track of the first chunk with space as fallback
+          if (chunkData.songs.length < 1000 && !bestChunk) {
+            bestChunk = docSnapshot;
+            bestChunkIndex = chunkData.chunkIndex;
+          }
+        }
+      }
+
+      // If we found a chunk in the right alphabetical range, use it
+      if (targetChunk) {
+        // Insert the song in the correct alphabetical position
+        const existingSongs = [...targetChunk.data().songs];
+        existingSongs.push(newSong);
+        existingSongs.sort((a, b) => a.name.localeCompare(b.name));
+        
+        await updateDoc(targetChunk.ref, { songs: existingSongs });
+        console.log(`Added custom song to existing chunk ${targetChunkIndex} in alphabetical order`);
+      } else if (bestChunk) {
+        // Use the fallback chunk with space
+        const existingSongs = [...bestChunk.data().songs];
+        existingSongs.push(newSong);
+        existingSongs.sort((a, b) => a.name.localeCompare(b.name));
+        
+        await updateDoc(bestChunk.ref, { songs: existingSongs });
+        console.log(`Added custom song to fallback chunk ${bestChunkIndex}`);
+      } else {
+        // Create new chunk if all existing chunks are full
+        const newChunk = {
+          chunkIndex: querySnapshot.size + 1,
+          totalChunks: querySnapshot.size + 1,
+          alphabeticalRange: `${songFirstLetter}-${songFirstLetter}`,
+          songs: [newSong],
+          chunkSize: 1,
+          totalSongs: 1,
+          importedAt: new Date(),
+          source: 'user_custom',
+          description: `Custom song "${songName}" added by user`
+        };
+        
+        await addDoc(songsCollection, newChunk);
+        console.log('Created new chunk for custom song');
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error adding custom song to database:', error);
+      return false;
+    }
+  };
+
+  const addCustomSong = async () => {
+    try {
+      if (!customSongInput.trim()) {
+        Alert.alert('Error', 'Please enter a song name');
+        return;
+      }
+
+      const currentSongs = profile.songs || [];
+      
+      if (currentSongs.length >= 15) {
+        Alert.alert('Error', 'Maximum 15 songs allowed');
+        return;
+      }
+
+      if (currentSongs.includes(customSongInput.trim())) {
+        Alert.alert('Error', 'This song is already in your list');
+        return;
+      }
+
+      const songName = customSongInput.trim();
+      
+      // Try to add to database first
+      const dbSuccess = await addCustomSongToDatabase(songName);
+      
+      // Add to user's profile regardless of database success
+      const updatedSongs = [...currentSongs, songName];
+      
+      const docRef = doc(db, 'users', user.uid);
+      await updateDoc(docRef, { songs: updatedSongs });
+      
+      setProfile({ ...profile, songs: updatedSongs });
+      setEditData({ ...editData, songs: updatedSongs });
+      setCustomSongInput('');
+      setIsAddingCustomSong(false);
+      setShowNoResultsMessage(false);
+      
+      if (dbSuccess) {
+        // Test if the song can be found immediately after adding
+        console.log(`Testing search for newly added song: "${songName}"`);
+        const testResults = await searchSongs(songName, 5);
+        console.log('Search test results:', testResults);
+        
+        if (testResults.length > 0) {
+          const found = testResults.some(song => song.name.toLowerCase() === songName.toLowerCase());
+          if (found) {
+            console.log('✅ Custom song found in search immediately after adding!');
+          } else {
+            console.log('❌ Custom song not found in search results');
+          }
+        } else {
+          console.log('❌ No search results found for custom song');
+        }
+        
+        // Set the search query to the newly added song so it appears in results
+        setSongSearchQuery(songName);
+        // The search effect will automatically run and show the results
+        
+        Alert.alert('Success', `"${songName}" added to your profile and database!`);
+      } else {
+        Alert.alert('Success', `"${songName}" added to your profile! (Database update failed)`);
+      }
+    } catch (error) {
+      console.error('Error adding custom song:', error);
+      Alert.alert('Error', 'Failed to add custom song');
+    }
   };
 
   const pickAudioFile = async () => {
@@ -624,48 +795,68 @@ const ProfileScreen = ({ navigation, route }) => {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.profilePic}>{profile.profilePic || '🎸'}</Text>
-        <Text style={styles.username}>{profile.username || 'Guitarist'}</Text>
-        <Text style={styles.skillLevel}>{profile.skillLevel || 'Beginner'}</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.profilePic}>{profile.profilePic || '🎸'}</Text>
+          <Text style={styles.username}>{profile.username || 'Guitarist'}</Text>
+          <Text style={styles.skillLevel}>{profile.skillLevel || 'Beginner'}</Text>
+        </View>
+        
+        <TouchableOpacity 
+          style={styles.signOutButton}
+          onPress={() => {
+            Alert.alert(
+              'Sign Out',
+              'Are you sure you want to sign out?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Sign Out', style: 'destructive', onPress: logout }
+              ]
+            );
+          }}
+        >
+          <Text style={styles.signOutButtonText}>Sign Out</Text>
+        </TouchableOpacity>
+      </View>
         
         {/* Email Section */}
-        {isEditingEmail ? (
-          <View style={styles.emailEditContainer}>
-            <TextInput
-              style={styles.emailInput}
-              value={emailInput}
-              onChangeText={setEmailInput}
-              placeholder="Enter your email"
-              placeholderTextColor="#666666"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <View style={styles.emailEditButtons}>
-              <TouchableOpacity style={styles.saveEmailButton} onPress={saveEmail}>
-                <Text style={styles.emailButtonText}>Save</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelEmailButton} onPress={cancelEmailEdit}>
-                <Text style={styles.emailButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.emailContainer}>
-            {profile.email ? (
-              <View style={styles.emailDisplayContainer}>
-                <Text style={styles.emailText}>{profile.email}</Text>
-                <TouchableOpacity style={styles.editEmailButton} onPress={startEmailEdit}>
-                  <Text style={styles.editEmailIcon}>✏️</Text>
+        <View style={styles.emailSection}>
+          {isEditingEmail ? (
+            <View style={styles.emailEditContainer}>
+              <TextInput
+                style={styles.emailInput}
+                value={emailInput}
+                onChangeText={setEmailInput}
+                placeholder="Enter your email"
+                placeholderTextColor="#666666"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <View style={styles.emailEditButtons}>
+                <TouchableOpacity style={styles.saveEmailButton} onPress={saveEmail}>
+                  <Text style={styles.emailButtonText}>Save</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelEmailButton} onPress={cancelEmailEdit}>
+                  <Text style={styles.emailButtonText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <TouchableOpacity style={styles.addEmailButton} onPress={startEmailEdit}>
-                <Text style={styles.addEmailButtonText}>Add Email</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </View>
+            </View>
+          ) : (
+            <View style={styles.emailContainer}>
+              {profile.email ? (
+                <View style={styles.emailDisplayContainer}>
+                  <Text style={styles.emailText}>{profile.email}</Text>
+                  <TouchableOpacity style={styles.editEmailButton} onPress={startEmailEdit}>
+                    <Text style={styles.editEmailIcon}>✏️</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.addEmailButton} onPress={startEmailEdit}>
+                  <Text style={styles.addEmailButtonText}>Add Email</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
 
       {isEditing ? (
         <View style={styles.editSection}>
@@ -865,6 +1056,30 @@ const ProfileScreen = ({ navigation, route }) => {
                   </View>
                 )}
 
+                {showNoResultsMessage && (
+                  <View style={styles.noResultsContainer}>
+                    <Text style={styles.noResultsText}>No songs found in database</Text>
+                    <Text style={styles.noResultsSubtext}>Add this song as a custom entry:</Text>
+                    
+                    <View style={styles.customSongInputContainer}>
+                      <TextInput
+                        style={styles.customSongInput}
+                        value={customSongInput}
+                        onChangeText={setCustomSongInput}
+                        placeholder="Enter song name..."
+                        placeholderTextColor="#666666"
+                      />
+                      
+                      <TouchableOpacity 
+                        style={styles.addCustomSongButton} 
+                        onPress={addCustomSong}
+                      >
+                        <Text style={styles.addCustomSongButtonText}>Add Custom Song</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
                 <View style={styles.songInputButtons}>
                   <TouchableOpacity style={styles.addSongButton} onPress={addSong}>
                     <Text style={styles.songButtonText}>Add</Text>
@@ -1061,10 +1276,16 @@ const styles = StyleSheet.create({
     marginTop: 50,
   },
   header: {
-    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+  },
+  headerLeft: {
+    alignItems: 'center',
+    flex: 1,
   },
   profilePic: {
     fontSize: 80,
@@ -1676,6 +1897,70 @@ const styles = StyleSheet.create({
     color: '#666666',
     fontSize: 14,
     marginTop: 5,
+  },
+  noResultsContainer: {
+    backgroundColor: '#333333',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#666666',
+  },
+  noResultsText: {
+    color: '#ff6b6b',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  noResultsSubtext: {
+    color: '#cccccc',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  customSongInputContainer: {
+    alignItems: 'center',
+  },
+  customSongInput: {
+    backgroundColor: '#444444',
+    color: '#ffffff',
+    padding: 15,
+    borderRadius: 10,
+    fontSize: 16,
+    width: '100%',
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#555555',
+  },
+  addCustomSongButton: {
+    backgroundColor: '#28a745',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  addCustomSongButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  signOutButton: {
+    backgroundColor: '#dc3545',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  signOutButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  emailSection: {
+    width: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 20,
   },
 });
 
